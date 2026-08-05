@@ -1,0 +1,130 @@
+"""Basic API tests for CANWeb."""
+
+import io
+import json
+import time
+import pytest
+
+# Patch can_manager before importing the app so no real CAN bus is needed.
+import sys, types
+
+# Import the app
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from app import app as flask_app, socketio
+
+
+@pytest.fixture
+def client():
+    flask_app.config["TESTING"] = True
+    with flask_app.test_client() as c:
+        yield c
+
+
+def test_index(client):
+    rv = client.get("/")
+    assert rv.status_code == 200
+    assert b"CANWeb" in rv.data
+
+
+def test_dbc_info_no_dbc(client):
+    rv = client.get("/api/dbc/info")
+    assert rv.status_code == 200
+    data = rv.get_json()
+    assert data["loaded"] is False
+
+
+def test_buffer_recent(client):
+    # Give simulator a moment to produce frames
+    time.sleep(0.5)
+    rv = client.get("/api/buffer/recent?limit=10")
+    assert rv.status_code == 200
+    frames = rv.get_json()
+    assert isinstance(frames, list)
+
+
+def test_signals_empty_without_dbc(client):
+    rv = client.get("/api/signals")
+    assert rv.status_code == 200
+    assert isinstance(rv.get_json(), list)
+
+
+def test_transmit_valid(client):
+    rv = client.post(
+        "/api/transmit",
+        json={"id": "0x100", "data": "DEADBEEF"},
+    )
+    assert rv.status_code == 200
+    assert rv.get_json()["ok"] is True
+
+
+def test_transmit_bad_data(client):
+    rv = client.post(
+        "/api/transmit",
+        json={"id": "0x100", "data": "ZZ"},  # invalid hex
+    )
+    assert rv.status_code == 400
+
+
+def test_export_csv(client):
+    rv = client.get("/api/export/csv")
+    assert rv.status_code == 200
+    assert rv.content_type.startswith("text/csv")
+
+
+def test_buffer_clear(client):
+    rv = client.post("/api/buffer/clear")
+    assert rv.status_code == 200
+    assert rv.get_json()["ok"] is True
+
+
+def test_config_save_json(client):
+    rv = client.post(
+        "/api/config/save",
+        json={"format": "json", "config": {"interface": "sim", "plotTabs": []}},
+    )
+    assert rv.status_code == 200
+    payload = json.loads(rv.data)
+    assert payload["interface"] == "sim"
+
+
+def test_config_save_yaml(client):
+    import yaml
+    rv = client.post(
+        "/api/config/save",
+        json={"format": "yaml", "config": {"interface": "sim"}},
+    )
+    assert rv.status_code == 200
+    payload = yaml.safe_load(rv.data)
+    assert payload["interface"] == "sim"
+
+
+def test_config_load_json(client):
+    cfg = json.dumps({"interface": "pcan", "plotTabs": []}).encode()
+    rv = client.post(
+        "/api/config/load",
+        data={"file": (io.BytesIO(cfg), "config.json")},
+        content_type="multipart/form-data",
+    )
+    assert rv.status_code == 200
+    data = rv.get_json()
+    assert data["ok"] is True
+    assert data["config"]["interface"] == "pcan"
+
+
+def test_connect_sim(client):
+    rv = client.post(
+        "/api/connect",
+        json={"interface": "sim", "channel": "virtual", "bitrate": 500000},
+    )
+    assert rv.status_code == 200
+    assert rv.get_json()["ok"] is True
+
+
+def test_disconnect(client):
+    rv = client.post("/api/disconnect")
+    assert rv.status_code == 200
+    assert rv.get_json()["ok"] is True
+    # Reconnect for other tests
+    client.post("/api/connect", json={"interface": "sim"})

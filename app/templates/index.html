@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>CANWeb – CAN Bus Monitor</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}"/>
+  <!-- Plotly CDN -->
+  <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+  <!-- Socket.IO CDN -->
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body>
+<header>
+  <h1>&#127758; CANWeb</h1>
+  <div id="status-bar">
+    <span class="stat-badge" id="stat-rx">RX: 0</span>
+    <span class="stat-badge" id="stat-errors">ERR: 0</span>
+    <span class="stat-badge" id="stat-load">Load: 0%</span>
+    <span class="stat-badge" id="stat-baud">500 kbps</span>
+    <span class="stat-badge connected" id="stat-conn">● Connected</span>
+  </div>
+</header>
+
+<nav id="tabs">
+  <button class="tab-btn active" data-tab="raw">Raw Traffic</button>
+  <button class="tab-btn" data-tab="decoded">Decoded Signals</button>
+  <button class="tab-btn" data-tab="plots">Plots</button>
+  <button class="tab-btn" data-tab="transmit">Transmit</button>
+  <button class="tab-btn" data-tab="settings">Settings</button>
+</nav>
+
+<!-- ── RAW TRAFFIC ──────────────────────────────────────────────────────── -->
+<section id="tab-raw" class="tab-content active">
+  <div class="toolbar">
+    <label>
+      <input type="radio" name="raw-mode" value="scroll" checked/> Scroll
+    </label>
+    <label>
+      <input type="radio" name="raw-mode" value="refresh"/> Refresh (last seen)
+    </label>
+    <button id="btn-clear-raw">Clear</button>
+    <button id="btn-pause-raw">Pause</button>
+    <button id="btn-export-csv">Export CSV</button>
+    <input id="raw-filter" type="text" placeholder="Filter by ID (e.g. 0x100)"/>
+  </div>
+  <div id="raw-container">
+    <table id="raw-table">
+      <thead>
+        <tr>
+          <th>Timestamp</th><th>ID</th><th>DLC</th><th>Data</th><th>EXT</th><th>Decoded</th>
+        </tr>
+      </thead>
+      <tbody id="raw-body"></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ── DECODED SIGNALS ───────────────────────────────────────────────────── -->
+<section id="tab-decoded" class="tab-content">
+  <div class="toolbar">
+    <form id="dbc-upload-form">
+      <label>DBC File: <input type="file" id="dbc-file" accept=".dbc"/></label>
+      <button type="submit">Upload</button>
+    </form>
+    <button id="btn-clear-dbc">Clear DBC</button>
+  </div>
+  <div id="dbc-info"></div>
+  <div id="signal-table-container">
+    <table id="signal-table">
+      <thead>
+        <tr><th>Signal</th><th>Latest Value</th><th>Unit</th><th>Timestamp</th></tr>
+      </thead>
+      <tbody id="signal-body"></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ── PLOTS ─────────────────────────────────────────────────────────────── -->
+<section id="tab-plots" class="tab-content">
+  <div class="toolbar">
+    <button id="btn-add-tab">+ Add Plot Tab</button>
+    <button id="btn-export-html">Export HTML</button>
+    <button id="btn-save-config">Save Config</button>
+    <label>Load Config: <input type="file" id="config-file" accept=".json,.yaml,.yml"/></label>
+  </div>
+  <div id="plot-tabs-nav"></div>
+  <div id="plot-tabs-content"></div>
+</section>
+
+<!-- ── TRANSMIT ──────────────────────────────────────────────────────────── -->
+<section id="tab-transmit" class="tab-content">
+  <h2>Transmit CAN Frame</h2>
+  <div class="form-group">
+    <label>Arbitration ID (hex):<input type="text" id="tx-id" value="0x100"/></label>
+    <label>Data (hex bytes):<input type="text" id="tx-data" placeholder="DE AD BE EF"/></label>
+    <label><input type="checkbox" id="tx-ext"/> Extended ID</label>
+    <button id="btn-transmit">Send</button>
+  </div>
+  <div id="tx-log-container">
+    <h3>Transmit Log</h3>
+    <table id="tx-table">
+      <thead><tr><th>Time</th><th>ID</th><th>Data</th><th>Status</th></tr></thead>
+      <tbody id="tx-body"></tbody>
+    </table>
+  </div>
+
+  <h2>Periodic Transmit</h2>
+  <div class="form-group">
+    <label>ID:<input type="text" id="ptx-id" value="0x200"/></label>
+    <label>Data:<input type="text" id="ptx-data" value="01 02 03 04"/></label>
+    <label>Interval (ms):<input type="number" id="ptx-interval" value="100" min="10"/></label>
+    <button id="btn-ptx-start">Start</button>
+    <button id="btn-ptx-stop" disabled>Stop</button>
+  </div>
+</section>
+
+<!-- ── SETTINGS ──────────────────────────────────────────────────────────── -->
+<section id="tab-settings" class="tab-content">
+  <h2>CAN Interface</h2>
+  <div class="form-group">
+    <label>Interface:
+      <select id="sel-interface">
+        <option value="sim">Simulated (demo)</option>
+        <option value="pcan">PCAN (pcan)</option>
+        <option value="kvaser">Kvaser (kvaser)</option>
+        <option value="socketcan">SocketCAN (Linux)</option>
+        <option value="vector">Vector</option>
+        <option value="ixxat">IXXAT</option>
+        <option value="serial">Serial / SLCAN</option>
+        <option value="virtual">Virtual (python-can)</option>
+      </select>
+    </label>
+    <label>Channel:<input type="text" id="inp-channel" value="PCAN_USBBUS1"/></label>
+    <label>Bitrate:
+      <select id="sel-bitrate">
+        <option value="125000">125 kbps</option>
+        <option value="250000">250 kbps</option>
+        <option value="500000" selected>500 kbps</option>
+        <option value="1000000">1 Mbps</option>
+      </select>
+    </label>
+    <button id="btn-connect">Connect</button>
+    <button id="btn-disconnect">Disconnect</button>
+  </div>
+  <div id="connect-msg"></div>
+</section>
+
+<!-- ── Add Plot Modal ─────────────────────────────────────────────────────── -->
+<div id="modal-add-plot" class="modal hidden">
+  <div class="modal-content">
+    <h3>Add Plot</h3>
+    <label>Title:<input type="text" id="plot-title" value="New Plot"/></label>
+    <label>Type:
+      <select id="plot-type">
+        <option value="line">Line</option>
+        <option value="scatter">Scatter</option>
+        <option value="histogram">Histogram</option>
+      </select>
+    </label>
+    <label>Signal:
+      <select id="plot-signal"><option value="">-- select --</option></select>
+    </label>
+    <div class="modal-buttons">
+      <button id="btn-modal-ok">Add</button>
+      <button id="btn-modal-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-backdrop" class="hidden"></div>
+
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
