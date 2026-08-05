@@ -185,8 +185,27 @@ $('dbc-upload-form').addEventListener('submit', async e => {
   const res = await fetch('/api/dbc/upload', { method: 'POST', body: fd });
   const data = await res.json();
   if (data.ok) {
-    const msgs = data.messages.map(m => `${m.id} ${m.name} (${m.signals.join(', ')})`).join('\n');
-    $('dbc-info').textContent = `Loaded: ${file.name}  •  ${data.messages.length} messages`;
+    const container = $('dbc-info');
+    container.textContent = '';
+    const label = document.createElement('strong');
+    label.textContent = 'Loaded:';
+    container.appendChild(label);
+    container.appendChild(document.createTextNode(` ${file.name} \u00a0\u2022\u00a0 ${data.messages.length} messages`));
+    container.appendChild(document.createElement('br'));
+    const ul = document.createElement('ul');
+    ul.style.cssText = 'margin:4px 0 0 16px;padding:0;';
+    data.messages.forEach(m => {
+      const li = document.createElement('li');
+      const idStrong = document.createElement('strong');
+      idStrong.textContent = m.id;
+      li.appendChild(idStrong);
+      li.appendChild(document.createTextNode(' ' + m.name));
+      if (m.signals.length) {
+        li.appendChild(document.createTextNode(' \u2014 ' + m.signals.join(', ')));
+      }
+      ul.appendChild(li);
+    });
+    container.appendChild(ul);
     // Populate plot signal selector
     refreshSignalSelector();
   } else {
@@ -577,7 +596,26 @@ $('btn-diagnose').addEventListener('click', async () => {
   // Load DBC info if any was previously loaded
   const info = await fetch('/api/dbc/info').then(r => r.json());
   if (info.loaded) {
-    $('dbc-info').textContent = `Loaded: ${info.filename}  •  ${info.messages.length} messages`;
+    const container = $('dbc-info');
+    container.textContent = '';
+    const label = document.createElement('strong');
+    label.textContent = 'Loaded:';
+    container.appendChild(label);
+    container.appendChild(document.createTextNode(` ${info.filename} \u00a0\u2022\u00a0 ${info.messages.length} messages`));
+    container.appendChild(document.createElement('br'));
+    const ul = document.createElement('ul');
+    ul.style.cssText = 'margin:4px 0 0 16px;padding:0;';
+    info.messages.forEach(m => {
+      const li = document.createElement('li');
+      const idStrong = document.createElement('strong');
+      idStrong.textContent = m.id;
+      li.appendChild(idStrong);
+      li.appendChild(document.createTextNode(' ' + m.name));
+      const sigs = m.signals.map(s => s.name).join(', ');
+      if (sigs) { li.appendChild(document.createTextNode(' \u2014 ' + sigs)); }
+      ul.appendChild(li);
+    });
+    container.appendChild(ul);
     await refreshSignalSelector();
   }
 })();

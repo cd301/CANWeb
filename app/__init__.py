@@ -159,11 +159,13 @@ def api_dbc_upload():
         return jsonify({"ok": False, "error": "No file"}), 400
     f = request.files["file"]
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".dbc")
-    f.save(tmp.name)
     try:
+        tmp.close()
+        f.save(tmp.name)
         info = dbc_manager.load_dbc(tmp.name)
         return jsonify({"ok": True, **info})
     except Exception:
+        _log.exception("DBC upload failed")
         return jsonify({"ok": False, "error": "Failed to parse DBC file"}), 400
     finally:
         os.unlink(tmp.name)
