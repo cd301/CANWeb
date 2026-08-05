@@ -13,11 +13,13 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app import app as flask_app, socketio
+from app import dbc_manager
 
 
 @pytest.fixture
 def client():
     flask_app.config["TESTING"] = True
+    dbc_manager.load_dbc(dbc_manager.default_dbc_path())
     with flask_app.test_client() as c:
         yield c
 
@@ -29,6 +31,7 @@ def test_index(client):
 
 
 def test_dbc_info_no_dbc(client):
+    client.post("/api/dbc/clear")
     rv = client.get("/api/dbc/info")
     assert rv.status_code == 200
     data = rv.get_json()
@@ -49,6 +52,14 @@ BO_ 256 EngineData: 8 Vector__XXX
  SG_ Throttle : 16|8@1+ (0.392156863,0) [0|100] "%" Vector__XXX
 
 '''
+
+
+def test_default_dbc_loaded(client):
+    rv = client.get("/api/dbc/info")
+    assert rv.status_code == 200
+    data = rv.get_json()
+    assert data["loaded"] is True
+    assert any(msg["name"] == "EngineData" for msg in data["messages"])
 
 
 def test_dbc_upload_valid(client):
@@ -137,6 +148,36 @@ def test_signals_includes_dbc_definitions(client):
     rv2 = client.get("/api/signals")
     signals2 = rv2.get_json()
     assert "EngineData.EngineSpeed" not in signals2
+
+
+def test_dbc_upload_redecodes_buffered_frames(client):
+    client.post("/api/dbc/clear")
+    client.post("/api/buffer/clear")
+
+    client.post(
+        "/api/transmit",
+        json={"id": "0x100", "data": "6400800000000000"},
+    )
+
+    before = client.get("/api/buffer/recent?limit=5").get_json()
+    assert any(frame["id"] == "0x100" and "decoded" not in frame for frame in before)
+
+    rv = client.post(
+        "/api/dbc/upload",
+        data={"file": (io.BytesIO(DBC_CONTENT), "test.dbc")},
+        content_type="multipart/form-data",
+    )
+    assert rv.status_code == 200
+
+    after = client.get("/api/buffer/recent?limit=5").get_json()
+    decoded_frame = next(frame for frame in after if frame["id"] == "0x100" and "decoded" in frame)
+    assert decoded_frame["decoded"]["name"] == "EngineData"
+    assert decoded_frame["decoded"]["signals"]["EngineSpeed"] == pytest.approx(25.0)
+    assert decoded_frame["decoded"]["signals"]["Throttle"] == pytest.approx(50.196078464)
+
+    signal_points = client.get("/api/signals/EngineData.EngineSpeed").get_json()["points"]
+    assert signal_points
+    assert signal_points[-1][1] == pytest.approx(25.0)
 
 
 def test_transmit_valid(client):
