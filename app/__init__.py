@@ -49,6 +49,42 @@ _signal_lock = threading.Lock()
 _stats = {"rx": 0, "errors": 0, "bus_load": 0.0, "bitrate": 500_000}
 
 
+def _store_decoded_signal(ts: float, decoded: dict[str, Any]):
+    with _signal_lock:
+        for sig, val in decoded["signals"].items():
+            key = f"{decoded['name']}.{sig}"
+            if key not in _signal_data:
+                _signal_data[key] = []
+            _signal_data[key].append((ts, val))
+            if len(_signal_data[key]) > 5000:
+                _signal_data[key] = _signal_data[key][-5000:]
+
+
+def _redecode_buffered_frames():
+    with _buffer_lock:
+        frames = list(_buffer)
+    rebuilt_signal_data: dict[str, list] = {}
+    for frame in frames:
+        try:
+            arb_id = int(frame["id"], 16)
+            data = bytes.fromhex(frame["data"])
+        except (KeyError, ValueError, TypeError):
+            continue
+        decoded = dbc_manager.decode_message(arb_id, data)
+        if decoded:
+            frame["decoded"] = decoded
+            for sig, val in decoded["signals"].items():
+                key = f"{decoded['name']}.{sig}"
+                rebuilt_signal_data.setdefault(key, []).append((frame["ts"], val))
+        else:
+            frame.pop("decoded", None)
+    with _buffer_lock:
+        _buffer[:] = frames
+    with _signal_lock:
+        _signal_data.clear()
+        _signal_data.update(rebuilt_signal_data)
+
+
 def _on_message(msg: can.Message):
     """Called from the CAN receive thread for every incoming frame."""
     ts = msg.timestamp or time.time()
@@ -67,15 +103,7 @@ def _on_message(msg: can.Message):
     decoded = dbc_manager.decode_message(arb_id, bytes(msg.data))
     if decoded:
         frame["decoded"] = decoded
-        with _signal_lock:
-            for sig, val in decoded["signals"].items():
-                key = f"{decoded['name']}.{sig}"
-                if key not in _signal_data:
-                    _signal_data[key] = []
-                _signal_data[key].append((ts, val))
-                # Keep last 5000 points per signal
-                if len(_signal_data[key]) > 5000:
-                    _signal_data[key] = _signal_data[key][-5000:]
+        _store_decoded_signal(ts, decoded)
 
     with _buffer_lock:
         _buffer.append(frame)
@@ -107,6 +135,11 @@ def _stats_loop():
 
 _stats_thread = threading.Thread(target=_stats_loop, daemon=True)
 _stats_thread.start()
+
+try:
+    dbc_manager.load_dbc(dbc_manager.default_dbc_path())
+except Exception:
+    _log.exception("Failed to load bundled default DBC")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -169,6 +202,7 @@ def api_dbc_upload():
         tmp.close()
         f.save(tmp.name)
         info = dbc_manager.load_dbc(tmp.name)
+        _redecode_buffered_frames()
         return jsonify({"ok": True, **info})
     except Exception:
         _log.exception("DBC upload failed")

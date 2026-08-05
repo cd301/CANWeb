@@ -72,6 +72,10 @@ def get_db_info() -> Optional[dict]:
         }
 
 
+def default_dbc_path() -> str:
+    return str((__import__("pathlib").Path(__file__).with_name("default.dbc")))
+
+
 def clear_dbc():
     global _db, _db_filename
     with _db_lock:
