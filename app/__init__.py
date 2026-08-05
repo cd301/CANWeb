@@ -25,6 +25,12 @@ from . import can_manager, dbc_manager
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "canweb-secret")
 socketio = SocketIO(app, async_mode="threading", cors_allowed_origins="*")
+if not app.logger.handlers:
+    logging.basicConfig(
+        level=os.environ.get("CANWEB_LOG_LEVEL", "INFO").upper(),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+app.logger.setLevel(os.environ.get("CANWEB_LOG_LEVEL", "INFO").upper())
 _log = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -201,6 +207,7 @@ def api_transmit():
         bus.send(msg)
         return jsonify({"ok": True})
     except Exception:
+        _log.exception("CAN transmit failed")
         return jsonify({"ok": False, "error": "Failed to transmit frame"}), 400
 
 
@@ -294,6 +301,7 @@ def api_config_load():
             config = json.loads(content)
         return jsonify({"ok": True, "config": config})
     except Exception:
+        _log.exception("Config load failed: filename=%s", f.filename)
         return jsonify({"ok": False, "error": "Failed to parse config file"}), 400
 
 

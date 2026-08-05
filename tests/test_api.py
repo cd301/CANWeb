@@ -156,6 +156,16 @@ def test_transmit_bad_data(client):
     assert rv.status_code == 400
 
 
+def test_transmit_bad_data_logs_failure(client, caplog):
+    caplog.set_level("ERROR")
+    rv = client.post(
+        "/api/transmit",
+        json={"id": "0x100", "data": "ZZ"},
+    )
+    assert rv.status_code == 400
+    assert "CAN transmit failed" in caplog.text
+
+
 def test_export_csv(client):
     rv = client.get("/api/export/csv")
     assert rv.status_code == 200
@@ -200,6 +210,17 @@ def test_config_load_json(client):
     data = rv.get_json()
     assert data["ok"] is True
     assert data["config"]["interface"] == "pcan"
+
+
+def test_config_load_invalid_logs_failure(client, caplog):
+    caplog.set_level("ERROR")
+    rv = client.post(
+        "/api/config/load",
+        data={"file": (io.BytesIO(b"{invalid"), "config.json")},
+        content_type="multipart/form-data",
+    )
+    assert rv.status_code == 400
+    assert "Config load failed: filename=config.json" in caplog.text
 
 
 def test_connect_sim(client):

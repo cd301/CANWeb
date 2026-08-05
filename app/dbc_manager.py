@@ -7,9 +7,13 @@ Wraps cantools to decode CAN messages given a loaded DBC database.
 from __future__ import annotations
 
 import threading
+import logging
 from typing import Optional
 
 import cantools
+
+
+_log = logging.getLogger(__name__)
 
 
 _db: Optional[cantools.db.Database] = None
@@ -44,6 +48,7 @@ def decode_message(arb_id: int, data: bytes) -> Optional[dict]:
             decoded = msg.decode(data, decode_choices=False)
             return {"name": msg.name, "signals": {k: float(v) for k, v in decoded.items()}}
         except Exception:
+            _log.exception("DBC decode failed for arbitration_id=0x%X", arb_id)
             return None
 
 
