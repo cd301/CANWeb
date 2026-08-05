@@ -208,8 +208,18 @@ def api_transmit():
 
 @app.route("/api/signals")
 def api_signals():
+    # Start with signals that have live data
     with _signal_lock:
-        return jsonify(list(_signal_data.keys()))
+        known = set(_signal_data.keys())
+    # Also include all signals defined in the loaded DBC so the UI can
+    # populate plot/signal selectors immediately after a DBC upload, even
+    # before any matching frames have been received.
+    db_info = dbc_manager.get_db_info()
+    if db_info:
+        for msg in db_info["messages"]:
+            for sig in msg["signals"]:
+                known.add(f"{msg['name']}.{sig['name']}")
+    return jsonify(sorted(known))
 
 
 @app.route("/api/signals/<path:signal_name>")
