@@ -119,6 +119,26 @@ def test_signals_empty_without_dbc(client):
     assert isinstance(rv.get_json(), list)
 
 
+def test_signals_includes_dbc_definitions(client):
+    """After uploading a DBC, /api/signals should list DBC-defined signals
+    even before any matching live frames have been received."""
+    client.post(
+        "/api/dbc/upload",
+        data={"file": (io.BytesIO(DBC_CONTENT), "test.dbc")},
+        content_type="multipart/form-data",
+    )
+    rv = client.get("/api/signals")
+    assert rv.status_code == 200
+    signals = rv.get_json()
+    assert "EngineData.EngineSpeed" in signals
+    assert "EngineData.Throttle" in signals
+    # Clearing the DBC should remove the definitions from the list
+    client.post("/api/dbc/clear")
+    rv2 = client.get("/api/signals")
+    signals2 = rv2.get_json()
+    assert "EngineData.EngineSpeed" not in signals2
+
+
 def test_transmit_valid(client):
     rv = client.post(
         "/api/transmit",

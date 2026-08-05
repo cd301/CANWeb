@@ -206,6 +206,8 @@ $('dbc-upload-form').addEventListener('submit', async e => {
       ul.appendChild(li);
     });
     container.appendChild(ul);
+    // Pre-populate Decoded Signals table from DBC definitions
+    populateSignalTableFromDbc(data.messages);
     // Populate plot signal selector
     refreshSignalSelector();
   } else {
@@ -221,6 +223,34 @@ $('btn-clear-dbc').addEventListener('click', async () => {
   signalLatest = {};
   refreshSignalSelector();
 });
+
+// Pre-populate the Decoded Signals table from DBC message definitions so
+// signals appear immediately after upload, before any live data arrives.
+// Each signal gets a placeholder "—" value that is replaced once real data
+// is received via the can_frame WebSocket event.
+function populateSignalTableFromDbc(messages) {
+  if (!messages) return;
+  messages.forEach(m => {
+    m.signals.forEach(sig => {
+      // sig may be a string (from upload response) or an object with .name/.unit (from /api/dbc/info)
+      const sigName = typeof sig === 'string' ? sig : sig.name;
+      const unit = (typeof sig === 'object' && sig.unit) ? sig.unit : '-';
+      const key = m.name + '.' + sigName;
+      if (!signalRows[key]) {
+        const tbody = $('signal-body');
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${key}</td>
+          <td>—</td>
+          <td>${unit}</td>
+          <td>—</td>
+        `;
+        tbody.appendChild(tr);
+        signalRows[key] = tr;
+      }
+    });
+  });
+}
 
 async function refreshSignalSelector() {
   const res = await fetch('/api/signals');
@@ -616,6 +646,7 @@ $('btn-diagnose').addEventListener('click', async () => {
       ul.appendChild(li);
     });
     container.appendChild(ul);
+    populateSignalTableFromDbc(info.messages);
     await refreshSignalSelector();
   }
 })();
