@@ -70,7 +70,7 @@ def _redecode_buffered_frames():
             data = bytes.fromhex(frame["data"])
         except (KeyError, ValueError, TypeError):
             continue
-        decoded = dbc_manager.decode_message(arb_id, data)
+        decoded = dbc_manager.decode_message(arb_id, data, frame.get("ext"))
         if decoded:
             frame["decoded"] = decoded
             for sig, val in decoded["signals"].items():
@@ -100,7 +100,7 @@ def _on_message(msg: can.Message):
     }
 
     # Try DBC decode
-    decoded = dbc_manager.decode_message(arb_id, bytes(msg.data))
+    decoded = dbc_manager.decode_message(arb_id, bytes(msg.data), msg.is_extended_id)
     if decoded:
         frame["decoded"] = decoded
         _store_decoded_signal(ts, decoded)
