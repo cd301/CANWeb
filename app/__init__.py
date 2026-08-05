@@ -222,6 +222,11 @@ def api_dbc_info():
 @app.route("/api/dbc/clear", methods=["POST"])
 def api_dbc_clear():
     dbc_manager.clear_dbc()
+    with _signal_lock:
+        _signal_data.clear()
+    with _buffer_lock:
+        for frame in _buffer:
+            frame.pop("decoded", None)
     return jsonify({"ok": True})
 
 
