@@ -128,7 +128,9 @@ def api_connect():
         bus.add_listener(_on_message)
         return jsonify({"ok": True, "interface": interface, "channel": channel, "bitrate": bitrate})
     except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
+        # exc is a ConnectionError with a pre-formatted user-facing message from can_manager
+        error_msg = exc.args[0] if exc.args else "Failed to connect to CAN interface"
+        return jsonify({"ok": False, "error": error_msg}), 400
 
 
 @app.route("/api/disconnect", methods=["POST"])
@@ -392,8 +394,9 @@ def api_diagnose():
         lines.append(f"[OK] Successfully connected to {interface} / {channel}")
         test_bus.remove_listener(can_manager._on_message if hasattr(can_manager, '_on_message') else lambda m: None)
     except Exception as exc:
+        diag_msg = exc.args[0] if exc.args else "Unknown connection error"
         lines.append(f"[FAIL] Connection failed:")
-        for part in str(exc).split(". "):
+        for part in diag_msg.split(". "):
             lines.append(f"       {part}.")
 
     return jsonify({"ok": True, "report": "\n".join(lines)})
