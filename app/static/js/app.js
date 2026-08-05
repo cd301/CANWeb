@@ -556,6 +556,22 @@ $('btn-disconnect').addEventListener('click', async () => {
   $('stat-conn').classList.remove('connected');
 });
 
+$('btn-diagnose').addEventListener('click', async () => {
+  const out = $('diag-output');
+  out.textContent = 'Running diagnostics…';
+  out.classList.remove('hidden');
+  const data = await fetch('/api/diagnose').then(r => r.json());
+  let html = `<strong>Python:</strong> ${data.python}<br><strong>Platform:</strong> ${data.platform}<br><br>`;
+  html += '<table class="diag-table"><thead><tr><th>Component</th><th>Status</th><th>Detail</th></tr></thead><tbody>';
+  for (const c of data.checks) {
+    const icon = c.ok ? '✔' : '✘';
+    const cls  = c.ok ? 'diag-ok' : 'diag-fail';
+    html += `<tr><td>${c.name}</td><td class="${cls}">${icon}</td><td>${c.detail}</td></tr>`;
+  }
+  html += '</tbody></table>';
+  out.innerHTML = html;
+});
+
 // ── Init ───────────────────────────────────────────────────────────────────
 (async () => {
   // Load DBC info if any was previously loaded
