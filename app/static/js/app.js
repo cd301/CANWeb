@@ -565,3 +565,61 @@ $('btn-disconnect').addEventListener('click', async () => {
     await refreshSignalSelector();
   }
 })();
+
+// ── Column Resizing for Raw Table ──────────────────────────────────────────
+(function initColResize() {
+  let dragging = null; // {handle, th, col, startX, startW}
+
+  document.querySelectorAll('#raw-table thead th .col-resize-handle').forEach(handle => {
+    handle.addEventListener('mousedown', e => {
+      e.preventDefault();
+      const th = handle.parentElement;
+      dragging = {
+        handle,
+        th,
+        startX: e.clientX,
+        startW: th.offsetWidth,
+      };
+      handle.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+    });
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const delta = e.clientX - dragging.startX;
+    const newW = Math.max(40, dragging.startW + delta);
+    // Find the matching <col> by data-col index
+    const colIdx = parseInt(dragging.th.getAttribute('data-col'));
+    const cols = document.querySelectorAll('#raw-table colgroup col');
+    if (cols[colIdx]) cols[colIdx].style.width = newW + 'px';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging.handle.classList.remove('dragging');
+    document.body.style.cursor = '';
+    dragging = null;
+  });
+})();
+
+// ── Diagnostics ────────────────────────────────────────────────────────────
+$('btn-diagnose').addEventListener('click', async () => {
+  const iface = $('sel-interface').value;
+  const channel = $('inp-channel').value;
+  const bitrate = $('sel-bitrate').value;
+  const out = $('diag-output');
+  out.textContent = 'Running diagnostics…';
+  out.style.display = 'block';
+  try {
+    const res = await fetch('/api/diagnose', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ interface: iface, channel, bitrate: parseInt(bitrate) }),
+    });
+    const data = await res.json();
+    out.textContent = data.report || 'No report returned.';
+  } catch (e) {
+    out.textContent = 'Diagnostics request failed: ' + e;
+  }
+});

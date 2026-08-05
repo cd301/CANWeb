@@ -77,8 +77,8 @@ def _on_message(msg: can.Message):
     socketio.emit("can_frame", frame)
 
 
-# Register callback with the default simulated bus
-can_manager.get_bus().add_listener(_on_message)
+# No bus is started automatically; listener is attached on explicit connect.
+# can_manager.get_bus().add_listener(_on_message)  -- removed: no auto-sim start
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -127,8 +127,8 @@ def api_connect():
         bus = can_manager.connect(interface, channel, bitrate)
         bus.add_listener(_on_message)
         return jsonify({"ok": True, "interface": interface, "channel": channel, "bitrate": bitrate})
-    except Exception:
-        return jsonify({"ok": False, "error": "Failed to connect to CAN interface"}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
 
 
 @app.route("/api/disconnect", methods=["POST"])
@@ -283,6 +283,120 @@ def api_buffer_clear():
     with _signal_lock:
         _signal_data.clear()
     return jsonify({"ok": True})
+
+
+@app.route("/api/diagnose", methods=["POST"])
+def api_diagnose():
+    """Return diagnostic information about the requested CAN interface."""
+    import importlib
+    import shutil
+    import sys
+    import platform
+
+    data = request.json or {}
+    interface = data.get("interface", "sim")
+    channel = data.get("channel", "virtual")
+    bitrate = int(data.get("bitrate", 500_000))
+
+    lines = []
+    lines.append(f"=== CANWeb Diagnostics ===")
+    lines.append(f"Platform : {platform.system()} {platform.release()} ({platform.machine()})")
+    lines.append(f"Python   : {sys.version.split()[0]}")
+    lines.append(f"Interface: {interface}  Channel: {channel}  Bitrate: {bitrate}")
+    lines.append("")
+
+    # Check python-can
+    try:
+        import can as _can
+        lines.append(f"[OK] python-can {_can.__version__} installed")
+    except ImportError:
+        lines.append("[FAIL] python-can is NOT installed – run: pip install python-can")
+
+    if interface.lower() == "pcan":
+        lines.append("")
+        lines.append("── PCAN checks ──")
+        try:
+            import PCANBasic
+            lines.append("[OK] PCANBasic Python module found")
+        except ImportError:
+            lines.append("[FAIL] PCANBasic Python module not found")
+            lines.append("       Install PEAK System PCAN drivers from https://www.peak-system.com/")
+
+        if sys.platform == "win32":
+            dll = shutil.which("PCANBasic.dll")
+            lines.append(f"[{'OK' if dll else '??'}] PCANBasic.dll on PATH: {dll or 'not found – install PCAN Basic API'}")
+        elif sys.platform.startswith("linux"):
+            drv = shutil.which("peak_usb") or "not found"
+            lines.append(f"     Linux: kernel module peak_usb – load with: sudo modprobe peak_usb")
+            import subprocess
+            try:
+                out = subprocess.check_output(["lsmod"], text=True)
+                if "peak_usb" in out:
+                    lines.append("[OK] peak_usb kernel module is loaded")
+                else:
+                    lines.append("[WARN] peak_usb kernel module not loaded – run: sudo modprobe peak_usb")
+            except Exception:
+                lines.append("[??] Could not check kernel modules (lsmod unavailable)")
+        lines.append(f"     Expected channel format: PCAN_USBBUS1 … PCAN_USBBUS8")
+        lines.append(f"     Current channel: {channel}")
+
+    elif interface.lower() == "kvaser":
+        lines.append("")
+        lines.append("── Kvaser checks ──")
+        try:
+            import canlib
+            lines.append("[OK] canlib Python package found")
+            try:
+                cl = canlib.canlib()
+                n = cl.getNumberOfChannels()
+                lines.append(f"[OK] canlib reports {n} channel(s) available")
+                for i in range(n):
+                    try:
+                        chi = cl.getChannelData_Name(i)
+                        lines.append(f"     Channel {i}: {chi}")
+                    except Exception:
+                        lines.append(f"     Channel {i}: (could not read name)")
+            except Exception as e:
+                lines.append(f"[FAIL] canlib initialisation error: {e}")
+                lines.append("       Ensure Kvaser CANlib drivers are installed: https://www.kvaser.com/downloads-kvaser/")
+        except ImportError:
+            lines.append("[FAIL] canlib Python package not installed – run: pip install canlib")
+        lines.append(f"     Expected channel format: 0-based integer (0 = first Kvaser channel)")
+        lines.append(f"     Current channel: {channel}")
+
+    elif interface.lower() == "socketcan":
+        lines.append("")
+        lines.append("── SocketCAN checks ──")
+        if sys.platform != "linux":
+            lines.append(f"[FAIL] SocketCAN requires Linux (current: {sys.platform})")
+        else:
+            import subprocess
+            try:
+                out = subprocess.check_output(["ip", "link", "show"], text=True)
+                if channel in out:
+                    lines.append(f"[OK] Interface '{channel}' found in ip link output")
+                else:
+                    lines.append(f"[WARN] Interface '{channel}' NOT found in ip link output")
+                    lines.append(f"       Available interfaces:")
+                    for line in out.splitlines():
+                        if ": " in line and not line.startswith(" "):
+                            lines.append(f"         {line.strip()}")
+                    lines.append(f"       Bring up: sudo ip link set {channel} type can bitrate {bitrate} && sudo ip link set {channel} up")
+            except Exception as e:
+                lines.append(f"[??] ip link check failed: {e}")
+
+    lines.append("")
+    lines.append("── Attempt connection ──")
+    try:
+        test_bus = can_manager.connect(interface, channel, bitrate)
+        lines.append(f"[OK] Successfully connected to {interface} / {channel}")
+        test_bus.remove_listener(can_manager._on_message if hasattr(can_manager, '_on_message') else lambda m: None)
+    except Exception as exc:
+        lines.append(f"[FAIL] Connection failed:")
+        for part in str(exc).split(". "):
+            lines.append(f"       {part}.")
+
+    return jsonify({"ok": True, "report": "\n".join(lines)})
 
 
 @app.route("/api/buffer/recent")

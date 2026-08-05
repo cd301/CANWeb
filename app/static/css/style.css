@@ -117,6 +117,7 @@ button:disabled:hover { background: var(--bg3); color: var(--text); border-color
 #raw-container, #signal-table-container, #tx-log-container {
   flex: 1;
   overflow-y: auto;
+  overflow-x: auto;
   padding: 0;
 }
 table {
@@ -124,6 +125,10 @@ table {
   border-collapse: collapse;
   font-family: var(--mono);
   font-size: 12px;
+}
+#raw-table {
+  table-layout: fixed;
+  min-width: 600px;
 }
 thead th {
   background: var(--bg2);
@@ -135,13 +140,36 @@ thead th {
   top: 0;
   text-align: left;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: none;
+  z-index: 1;
+}
+#raw-table thead th[data-col] {
+  padding-right: 14px; /* space for resize handle */
 }
 tbody tr { border-bottom: 1px solid var(--bg3); }
 tbody tr:hover { background: var(--bg2); }
-tbody td { padding: 4px 10px; vertical-align: top; }
+tbody td { padding: 4px 10px; vertical-align: top; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .td-id { color: var(--accent); }
 .td-data { color: var(--accent2); letter-spacing: .05em; }
 .td-error { color: var(--danger); }
+
+/* Column resize handle */
+.col-resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  cursor: col-resize;
+  z-index: 1;
+  background: transparent;
+}
+.col-resize-handle:hover, .col-resize-handle.dragging {
+  background: var(--accent);
+  opacity: 0.5;
+}
 
 /* ── Decoded panel ───────────────────────────────────────────────────────── */
 #dbc-info {

@@ -19,6 +19,8 @@ from app import app as flask_app, socketio
 def client():
     flask_app.config["TESTING"] = True
     with flask_app.test_client() as c:
+        # Start a simulated bus so tests that need an active bus work
+        c.post("/api/connect", json={"interface": "sim", "channel": "virtual", "bitrate": 500000})
         yield c
 
 

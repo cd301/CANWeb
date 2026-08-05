@@ -18,7 +18,7 @@
     <span class="stat-badge" id="stat-errors">ERR: 0</span>
     <span class="stat-badge" id="stat-load">Load: 0%</span>
     <span class="stat-badge" id="stat-baud">500 kbps</span>
-    <span class="stat-badge connected" id="stat-conn">● Connected</span>
+    <span class="stat-badge" id="stat-conn">○ Disconnected</span>
   </div>
 </header>
 
@@ -46,9 +46,22 @@
   </div>
   <div id="raw-container">
     <table id="raw-table">
+      <colgroup>
+        <col class="col-ts"  style="width:120px"/>
+        <col class="col-id"  style="width:100px"/>
+        <col class="col-dlc" style="width:50px"/>
+        <col class="col-data"style="width:220px"/>
+        <col class="col-ext" style="width:55px"/>
+        <col class="col-dec" style="width:auto"/>
+      </colgroup>
       <thead>
         <tr>
-          <th>Timestamp</th><th>ID</th><th>DLC</th><th>Data</th><th>EXT</th><th>Decoded</th>
+          <th data-col="0">Timestamp<span class="col-resize-handle"></span></th>
+          <th data-col="1">ID<span class="col-resize-handle"></span></th>
+          <th data-col="2">DLC<span class="col-resize-handle"></span></th>
+          <th data-col="3">Data<span class="col-resize-handle"></span></th>
+          <th data-col="4">EXT<span class="col-resize-handle"></span></th>
+          <th data-col="5">Decoded</th>
         </tr>
       </thead>
       <tbody id="raw-body"></tbody>
@@ -144,6 +157,15 @@
     <button id="btn-disconnect">Disconnect</button>
   </div>
   <div id="connect-msg"></div>
+
+  <h2 style="margin-top:24px">Diagnostics</h2>
+  <p style="color:var(--text-dim);font-size:12px;margin-bottom:10px">
+    If you cannot connect, click <strong>Run Diagnostics</strong> to check driver availability and common issues.
+  </p>
+  <div class="form-group">
+    <button id="btn-diagnose">Run Diagnostics</button>
+  </div>
+  <div id="diag-output" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:12px;font-family:var(--mono);font-size:12px;white-space:pre-wrap;color:var(--text);margin-top:8px;max-height:320px;overflow-y:auto;"></div>
 </section>
 
 <!-- ── Add Plot Modal ─────────────────────────────────────────────────────── -->

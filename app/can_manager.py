@@ -8,10 +8,11 @@ hardware is available so the app can run without any dongle attached.
 
 from __future__ import annotations
 
+import importlib
 import threading
 import time
 import random
-import queue
+import sys
 from typing import Optional, Callable
 
 import can
@@ -175,16 +176,130 @@ def get_bus():
     return _bus_instance
 
 
+def _diagnose_error(interface: str, channel: str, exc: Exception) -> str:
+    """Return a human-readable diagnostic message for a failed CAN connection."""
+    err = str(exc)
+    iface_lower = interface.lower()
+
+    # ── PCAN ──────────────────────────────────────────────────────────────────
+    if iface_lower == "pcan":
+        # Check if the pcan Python package is installed
+        try:
+            importlib.import_module("uptime")  # pcan backend uses ctypes, not a separate package
+        except ImportError:
+            pass
+        try:
+            importlib.import_module("PCANBasic")
+        except ImportError:
+            return (
+                "PCAN: The PCANBasic library is not installed or not found on PATH. "
+                "Install PEAK System PCAN drivers from https://www.peak-system.com/Software.68.0.html "
+                "and ensure PCANBasic.dll (Windows) or libpcanbasic.so (Linux) is accessible."
+            )
+        if "PCAN_ERROR_NODRIVER" in err or "no driver" in err.lower():
+            return (
+                f"PCAN: Driver not loaded for channel '{channel}'. "
+                "Ensure PEAK PCAN drivers are installed and the device is plugged in. "
+                "On Linux, run: sudo modprobe peak_usb"
+            )
+        if "PCAN_ERROR_BUSOFF" in err or "bus off" in err.lower():
+            return (
+                f"PCAN: Channel '{channel}' is in Bus-Off state. "
+                "Check CAN bus wiring, termination resistors (120Ω at each end), "
+                "and that at least one other node is active on the bus."
+            )
+        if "PCAN_ERROR_INITIALIZE" in err or "not initialized" in err.lower():
+            return (
+                f"PCAN: Channel '{channel}' could not be initialised. "
+                "Ensure the device is connected via USB, not already opened by another application "
+                "(e.g. PEAK PCAN-View), and that the channel name is correct (e.g. PCAN_USBBUS1)."
+            )
+        if "PCAN_ERROR_ILLHW" in err or "illegal hardware" in err.lower():
+            return (
+                f"PCAN: Illegal hardware handle for channel '{channel}'. "
+                "Valid channel names are PCAN_USBBUS1 … PCAN_USBBUS8 for USB devices."
+            )
+        return (
+            f"PCAN: Could not open channel '{channel}'. "
+            f"Raw error: {err}. "
+            "Check: device is plugged in, drivers are installed, channel name is correct, "
+            "and no other application has the channel open."
+        )
+
+    # ── Kvaser ────────────────────────────────────────────────────────────────
+    if iface_lower == "kvaser":
+        try:
+            importlib.import_module("canlib")
+        except ImportError:
+            return (
+                "Kvaser: The 'canlib' Python package is not installed. "
+                "Install Kvaser drivers and CANlib SDK from https://www.kvaser.com/downloads-kvaser/ "
+                "then install the Python wrapper: pip install canlib"
+            )
+        if "canERR_NOTFOUND" in err or "not found" in err.lower():
+            return (
+                f"Kvaser: No Kvaser device found on channel '{channel}'. "
+                "Ensure the device is plugged in, Kvaser drivers are installed, "
+                "and the channel index is correct (0-based: channel 0 = first device)."
+            )
+        if "canERR_NOCHANNELS" in err or "no channels" in err.lower():
+            return (
+                "Kvaser: No Kvaser CAN channels found. "
+                "Plug in a Kvaser device and install the Kvaser drivers."
+            )
+        if "canERR_INVHANDLE" in err or "invalid handle" in err.lower():
+            return (
+                f"Kvaser: Invalid channel handle for channel '{channel}'. "
+                "Kvaser channels are 0-based integers (e.g. 0 for the first channel)."
+            )
+        return (
+            f"Kvaser: Could not open channel '{channel}'. "
+            f"Raw error: {err}. "
+            "Check: device is plugged in, Kvaser CANlib drivers are installed, "
+            "channel index is correct (0-based integer), and bitrate matches the bus."
+        )
+
+    # ── SocketCAN ─────────────────────────────────────────────────────────────
+    if iface_lower == "socketcan":
+        if sys.platform != "linux":
+            return (
+                "SocketCAN is only available on Linux. "
+                "On Windows or macOS, use a USB CAN adapter with its own driver (PCAN, Kvaser, etc.)."
+            )
+        if "no such device" in err.lower() or "network interface" in err.lower():
+            return (
+                f"SocketCAN: Interface '{channel}' not found. "
+                f"Run: ip link show  to list available interfaces. "
+                f"Bring up the interface with: sudo ip link set {channel} type can bitrate 500000 && sudo ip link set {channel} up"
+            )
+        return (
+            f"SocketCAN: Could not open '{channel}'. "
+            f"Raw error: {err}. "
+            "Ensure the interface is up: sudo ip link set <iface> up"
+        )
+
+    # ── Generic fallback ──────────────────────────────────────────────────────
+    return (
+        f"Failed to connect to CAN interface '{interface}' on channel '{channel}'. "
+        f"Error: {err}. "
+        "Check that the required drivers and Python packages are installed for this interface."
+    )
+
+
 def connect(interface: str = "virtual", channel: str = "virtual",
             bitrate: int = 500_000, **kwargs):
     global _bus_instance
     with _bus_lock:
         if _bus_instance is not None:
             _bus_instance.shutdown()
-        if interface == "virtual" or interface == "sim":
+        if interface in ("virtual", "sim"):
             _bus_instance = _SimulatedBus()
         else:
-            _bus_instance = _RealBus(interface, channel, bitrate, **kwargs)
+            try:
+                _bus_instance = _RealBus(interface, channel, bitrate, **kwargs)
+            except Exception as exc:
+                _bus_instance = None
+                raise ConnectionError(_diagnose_error(interface, channel, exc)) from exc
     return _bus_instance
 
 
@@ -194,7 +309,3 @@ def disconnect():
         if _bus_instance is not None:
             _bus_instance.shutdown()
             _bus_instance = None
-
-
-# Start simulated bus by default on import so the UI works immediately.
-connect("sim")
