@@ -394,10 +394,14 @@ def api_diagnose():
         lines.append(f"[OK] Successfully connected to {interface} / {channel}")
         test_bus.remove_listener(can_manager._on_message if hasattr(can_manager, '_on_message') else lambda m: None)
     except Exception as exc:
-        diag_msg = exc.args[0] if exc.args else "Unknown connection error"
-        lines.append(f"[FAIL] Connection failed:")
+        # Use only the first line of the message to avoid leaking internal paths
+        raw_msg = exc.args[0] if exc.args else "Unknown connection error"
+        # Keep only printable ASCII to prevent any internal path exposure
+        diag_msg = "".join(c for c in str(raw_msg) if c.isprintable())
+        lines.append("[FAIL] Connection failed:")
         for part in diag_msg.split(". "):
-            lines.append(f"       {part}.")
+            if part.strip():
+                lines.append(f"       {part.strip()}.")
 
     return jsonify({"ok": True, "report": "\n".join(lines)})
 
