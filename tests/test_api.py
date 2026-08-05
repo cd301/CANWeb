@@ -35,6 +35,75 @@ def test_dbc_info_no_dbc(client):
     assert data["loaded"] is False
 
 
+DBC_CONTENT = b'''
+VERSION ""
+
+NS_ :
+
+BS_:
+
+BU_:
+
+BO_ 256 EngineData: 8 Vector__XXX
+ SG_ EngineSpeed : 0|16@1+ (0.25,0) [0|16383.75] "rpm" Vector__XXX
+ SG_ Throttle : 16|8@1+ (0.392156863,0) [0|100] "%" Vector__XXX
+
+'''
+
+
+def test_dbc_upload_valid(client):
+    rv = client.post(
+        "/api/dbc/upload",
+        data={"file": (io.BytesIO(DBC_CONTENT), "test.dbc")},
+        content_type="multipart/form-data",
+    )
+    assert rv.status_code == 200
+    data = rv.get_json()
+    assert data["ok"] is True
+    assert len(data["messages"]) == 1
+    msg = data["messages"][0]
+    assert msg["name"] == "EngineData"
+    assert "EngineSpeed" in msg["signals"]
+    assert "Throttle" in msg["signals"]
+
+
+def test_dbc_upload_populates_info(client):
+    client.post(
+        "/api/dbc/upload",
+        data={"file": (io.BytesIO(DBC_CONTENT), "test.dbc")},
+        content_type="multipart/form-data",
+    )
+    rv = client.get("/api/dbc/info")
+    assert rv.status_code == 200
+    data = rv.get_json()
+    assert data["loaded"] is True
+    assert len(data["messages"]) == 1
+
+
+def test_dbc_upload_invalid_file(client):
+    rv = client.post(
+        "/api/dbc/upload",
+        data={"file": (io.BytesIO(b"not a dbc file"), "bad.dbc")},
+        content_type="multipart/form-data",
+    )
+    assert rv.status_code == 400
+    data = rv.get_json()
+    assert data["ok"] is False
+
+
+def test_dbc_clear(client):
+    client.post(
+        "/api/dbc/upload",
+        data={"file": (io.BytesIO(DBC_CONTENT), "test.dbc")},
+        content_type="multipart/form-data",
+    )
+    rv = client.post("/api/dbc/clear")
+    assert rv.status_code == 200
+    assert rv.get_json()["ok"] is True
+    info_rv = client.get("/api/dbc/info")
+    assert info_rv.get_json()["loaded"] is False
+
+
 def test_buffer_recent(client):
     # Give simulator a moment to produce frames
     time.sleep(0.5)
