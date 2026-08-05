@@ -62,6 +62,13 @@ def test_default_dbc_loaded(client):
     assert any(msg["name"] == "EngineData" for msg in data["messages"])
 
 
+def test_decode_message_ignores_unknown_frame_id(client, caplog):
+    caplog.set_level("ERROR")
+    decoded = dbc_manager.decode_message(0x1A4, bytes.fromhex("0000000000000000"))
+    assert decoded is None
+    assert "DBC decode failed for arbitration_id=0x1A4" not in caplog.text
+
+
 def test_dbc_upload_valid(client):
     rv = client.post(
         "/api/dbc/upload",

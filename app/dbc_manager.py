@@ -45,6 +45,9 @@ def decode_message(arb_id: int, data: bytes) -> Optional[dict]:
             return None
         try:
             msg = _db.get_message_by_frame_id(arb_id)
+        except KeyError:
+            return None
+        try:
             decoded = msg.decode(data, decode_choices=False)
             return {"name": msg.name, "signals": {k: float(v) for k, v in decoded.items()}}
         except Exception:
