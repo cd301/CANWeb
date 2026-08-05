@@ -167,6 +167,36 @@ class _RealBus:
 # Public manager
 # ──────────────────────────────────────────────────────────────────────────────
 
+_INTERFACE_HINTS: dict[str, str] = {
+    "pcan": (
+        " — ensure the PCAN driver (PEAK PCAN Basic) is installed and the device "
+        "is plugged in. Check the channel name (e.g. PCAN_USBBUS1)."
+    ),
+    "kvaser": (
+        " — ensure Kvaser drivers (canlib) are installed and the device is "
+        "connected. Check the channel index (e.g. 0)."
+    ),
+    "socketcan": (
+        " — ensure the SocketCAN interface is up (`ip link set <iface> up type can`)."
+    ),
+    "vector": (
+        " — ensure Vector XL Driver Library is installed and an application "
+        "channel is configured in Vector Hardware Config."
+    ),
+    "ixxat": (
+        " — ensure the IXXAT VCI driver is installed and the device is connected."
+    ),
+    "serial": (
+        " — ensure the serial port exists and is not in use by another process."
+    ),
+}
+
+
+def _connection_hint(interface: str, channel: str) -> str:
+    """Return a human-readable diagnostic hint for common CAN interfaces."""
+    return _INTERFACE_HINTS.get(interface.lower(), "")
+
+
 _bus_instance = None
 _bus_lock = threading.Lock()
 
@@ -184,7 +214,14 @@ def connect(interface: str = "virtual", channel: str = "virtual",
         if interface == "virtual" or interface == "sim":
             _bus_instance = _SimulatedBus()
         else:
-            _bus_instance = _RealBus(interface, channel, bitrate, **kwargs)
+            try:
+                _bus_instance = _RealBus(interface, channel, bitrate, **kwargs)
+            except Exception as exc:
+                _bus_instance = None
+                hint = _connection_hint(interface, channel)
+                raise RuntimeError(
+                    f"Cannot open {interface} on channel '{channel}': {exc}{hint}"
+                ) from exc
     return _bus_instance
 
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import logging
 import os
 import tempfile
 import threading
@@ -24,6 +25,7 @@ from . import can_manager, dbc_manager
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "canweb-secret")
 socketio = SocketIO(app, async_mode="threading", cors_allowed_origins="*")
+_log = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # In-memory ring buffer of raw frames (for export / history)
@@ -127,8 +129,17 @@ def api_connect():
         bus = can_manager.connect(interface, channel, bitrate)
         bus.add_listener(_on_message)
         return jsonify({"ok": True, "interface": interface, "channel": channel, "bitrate": bitrate})
-    except Exception:
-        return jsonify({"ok": False, "error": "Failed to connect to CAN interface"}), 400
+    except Exception as exc:
+        # Log the full exception server-side for debugging, but only return a
+        # sanitised type+message to the client to avoid exposing internal paths.
+        _log.exception("CAN connect failed: interface=%s channel=%s", interface, channel)
+        exc_type = type(exc).__name__
+        exc_msg = str(exc)
+        # Strip any absolute file paths from the message before sending to client
+        import re as _re
+        exc_msg = _re.sub(r'(?:/[\w./\\-]+)', '<path>', exc_msg)
+        safe_msg = f"{exc_type}: {exc_msg}" if exc_msg else "Failed to connect to CAN interface"
+        return jsonify({"ok": False, "error": safe_msg}), 400
 
 
 @app.route("/api/disconnect", methods=["POST"])
@@ -290,6 +301,42 @@ def api_buffer_recent():
     limit = int(request.args.get("limit", 200))
     with _buffer_lock:
         return jsonify(_buffer[-limit:])
+
+
+# ── Diagnostics ───────────────────────────────────────────────────────────────
+
+@app.route("/api/diagnose")
+def api_diagnose():
+    """Return diagnostics about available CAN interfaces and python-can version."""
+    import importlib
+    import sys
+    import platform
+
+    checks: list[dict] = []
+
+    def _check(name: str, import_name: str, detail: str):
+        try:
+            mod = importlib.import_module(import_name)
+            version = getattr(mod, "__version__", "unknown")
+            checks.append({"name": name, "ok": True,
+                            "detail": f"{detail} (v{version})"})
+        except ImportError:
+            checks.append({"name": name, "ok": False,
+                            "detail": f"{detail} — not installed"})
+
+    _check("python-can", "can", "Core CAN library")
+    _check("PCAN driver (python-can pcan)", "can.interfaces.pcan", "Required for PEAK PCAN adapters")
+    _check("Kvaser driver (python-can kvaser)", "can.interfaces.kvaser", "Required for Kvaser adapters")
+    _check("SocketCAN", "can.interfaces.socketcan", "Built-in Linux SocketCAN support")
+    _check("Vector XL", "can.interfaces.vector", "Required for Vector adapters")
+    _check("IXXAT VCI", "can.interfaces.ixxat", "Required for IXXAT adapters")
+    _check("Serial/SLCAN", "can.interfaces.slcan", "Required for serial SLCAN adapters")
+
+    return jsonify({
+        "python": sys.version,
+        "platform": platform.platform(),
+        "checks": checks,
+    })
 
 
 # ──────────────────────────────────────────────────────────────────────────────

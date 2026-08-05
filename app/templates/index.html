@@ -46,6 +46,14 @@
   </div>
   <div id="raw-container">
     <table id="raw-table">
+      <colgroup>
+        <col style="width:110px"/>
+        <col style="width:90px"/>
+        <col style="width:50px"/>
+        <col style="width:200px"/>
+        <col style="width:50px"/>
+        <col/>
+      </colgroup>
       <thead>
         <tr>
           <th>Timestamp</th><th>ID</th><th>DLC</th><th>Data</th><th>EXT</th><th>Decoded</th>
@@ -144,6 +152,12 @@
     <button id="btn-disconnect">Disconnect</button>
   </div>
   <div id="connect-msg"></div>
+
+  <h2>Diagnostics</h2>
+  <div class="form-group">
+    <button id="btn-diagnose">Run Diagnostics</button>
+  </div>
+  <div id="diag-output" class="diag-output hidden"></div>
 </section>
 
 <!-- ── Add Plot Modal ─────────────────────────────────────────────────────── -->
