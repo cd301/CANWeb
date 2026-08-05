@@ -97,6 +97,54 @@ VAL_ 512 Status 0 "OFF" 1 "ON" 2 "ERROR" 3 "UNKNOWN" ;
 '''
 
 
+DBC_WITH_EXTENDED_FRAME = b'''
+VERSION ""
+
+NS_ :
+\tNS_DESC_
+\tCM_
+\tBA_DEF_
+\tBA_
+\tVAL_
+\tCAT_DEF_
+\tCAT_
+\tFILTER
+\tBA_DEF_DEF_
+\tEV_DATA_
+\tENVVAR_DATA_
+\tSGTYPE_
+\tSGTYPE_VAL_
+\tBA_DEF_SGTYPE_
+\tBA_SGTYPE_
+\tSIG_TYPE_REF_
+\tVAL_TABLE_
+\tSIG_GROUP_
+\tSIG_VALTYPE_
+\tSIGTYPE_VALTYPE_
+\tBO_TX_BU_
+\tBA_DEF_REL_
+\tBA_REL_
+\tBA_DEF_DEF_REL_
+\tBU_SG_REL_
+\tBU_EV_REL_
+\tBU_BO_REL_
+\tSG_MUL_VAL_
+
+BS_:
+
+BU_: Host out
+
+BO_ 2147483650 Direct: 8 out
+ SG_ sig1 : 0|8@1+ (1,0) [0|0] "" Host
+ SG_ skehk : 8|8@1+ (1,0) [0|0] "" Host
+ SG_ asdfnlkw : 16|8@1+ (1,0) [0|0] "" Host
+ SG_ sfdsaf : 24|8@1+ (1,0) [0|0] "" Host
+ SG_ dfasutput : 32|8@1+ (1,0) [0|0] "" Host
+ SG_ FanPWM : 40|8@1+ (1,0) [0|0] "" Host
+
+'''
+
+
 def test_decode_message_named_signal_value(client):
     """Signals with VAL_ definitions should decode to numeric float values."""
     import io
@@ -109,6 +157,31 @@ def test_decode_message_named_signal_value(client):
     decoded = dbc_manager.decode_message(0x200, bytes([0x01]))
     assert decoded is not None
     assert decoded["signals"]["Status"] == pytest.approx(1.0)
+
+
+def test_dbc_upload_decodes_extended_frame_signals(client):
+    rv = client.post(
+        "/api/dbc/upload",
+        data={"file": (io.BytesIO(DBC_WITH_EXTENDED_FRAME), "extended.dbc")},
+        content_type="multipart/form-data",
+    )
+    assert rv.status_code == 200
+    msg = rv.get_json()["messages"][0]
+    assert msg["id"] == "0x2"
+    assert msg["name"] == "Direct"
+    assert "FanPWM" in msg["signals"]
+
+    decoded = dbc_manager.decode_message(0x2, bytes([1, 2, 3, 4, 5, 6]), is_extended=True)
+    assert decoded is not None
+    assert decoded["name"] == "Direct"
+    assert decoded["signals"] == {
+        "sig1": pytest.approx(1.0),
+        "skehk": pytest.approx(2.0),
+        "asdfnlkw": pytest.approx(3.0),
+        "sfdsaf": pytest.approx(4.0),
+        "dfasutput": pytest.approx(5.0),
+        "FanPWM": pytest.approx(6.0),
+    }
 
 
 def test_dbc_upload_valid(client):
@@ -227,6 +300,31 @@ def test_dbc_upload_redecodes_buffered_frames(client):
     signal_points = client.get("/api/signals/EngineData.EngineSpeed").get_json()["points"]
     assert signal_points
     assert signal_points[-1][1] == pytest.approx(25.0)
+
+
+def test_dbc_upload_redecodes_buffered_extended_frames(client):
+    client.post("/api/dbc/clear")
+    client.post("/api/buffer/clear")
+
+    client.post(
+        "/api/transmit",
+        json={"id": "0x2", "data": "010203040506", "extended": True},
+    )
+
+    before = client.get("/api/buffer/recent?limit=5").get_json()
+    assert any(frame["id"] == "0x2" and frame["ext"] is True and "decoded" not in frame for frame in before)
+
+    rv = client.post(
+        "/api/dbc/upload",
+        data={"file": (io.BytesIO(DBC_WITH_EXTENDED_FRAME), "extended.dbc")},
+        content_type="multipart/form-data",
+    )
+    assert rv.status_code == 200
+
+    after = client.get("/api/buffer/recent?limit=5").get_json()
+    decoded_frame = next(frame for frame in after if frame["id"] == "0x2" and frame["ext"] is True and "decoded" in frame)
+    assert decoded_frame["decoded"]["name"] == "Direct"
+    assert decoded_frame["decoded"]["signals"]["FanPWM"] == pytest.approx(6.0)
 
 
 def test_transmit_valid(client):
