@@ -11,10 +11,13 @@ from __future__ import annotations
 import threading
 import time
 import random
-import queue
+import logging
 from typing import Optional, Callable
 
 import can
+
+
+_log = logging.getLogger(__name__)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -59,7 +62,7 @@ class _SimulatedBus:
                     try:
                         cb(msg)
                     except Exception:
-                        pass
+                        _log.exception("CAN listener callback failed on simulated bus")
             time.sleep(random.uniform(0.02, 0.1))
 
     def add_listener(self, cb: Callable):
@@ -77,7 +80,7 @@ class _SimulatedBus:
                 try:
                     cb(msg)
                 except Exception:
-                    pass
+                    _log.exception("CAN listener callback failed during send")
 
     def shutdown(self):
         self._stop.set()
@@ -122,6 +125,7 @@ class _RealBus:
             try:
                 msg = self._bus.recv(timeout=0.1)
             except Exception:
+                _log.exception("CAN receive loop failed")
                 time.sleep(0.05)
                 continue
             if msg is None:
@@ -135,7 +139,7 @@ class _RealBus:
                     try:
                         cb(msg)
                     except Exception:
-                        pass
+                        _log.exception("CAN listener callback failed on real bus")
 
     def add_listener(self, cb: Callable):
         with self._lock:
