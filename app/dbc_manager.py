@@ -48,8 +48,20 @@ def decode_message(arb_id: int, data: bytes) -> Optional[dict]:
         except KeyError:
             return None
         try:
-            decoded = msg.decode(data, decode_choices=False)
-            return {"name": msg.name, "signals": {k: float(v) for k, v in decoded.items()}}
+            decoded = msg.decode(data, decode_choices=False, allow_truncated=True)
+            signals = {}
+            for k, v in decoded.items():
+                try:
+                    signals[k] = float(v)
+                except (TypeError, ValueError):
+                    # Signal value is not numeric (e.g. NamedSignalValue from an
+                    # AUTOSAR/ARXML DBC). Fall back to the raw integer if available,
+                    # otherwise skip it so one bad signal doesn't drop the whole frame.
+                    try:
+                        signals[k] = float(v.value)
+                    except Exception:
+                        pass
+            return {"name": msg.name, "signals": signals}
         except Exception:
             _log.exception("DBC decode failed for arbitration_id=0x%X", arb_id)
             return None

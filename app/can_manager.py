@@ -42,7 +42,7 @@ class _SimulatedBus:
         self._thread.start()
 
     # IDs that we simulate (realistic-ish)
-    _ARBIT_IDS = [0x100, 0x200, 0x300, 0x400, 0x18FF1234, 0x18FF5678]
+    _ARBIT_IDS = [0x100, 0x200, 0x300, 0x400, 0x18FF1234, 0x18FF5378]
 
     def _run(self):
         while not self._stop.is_set():

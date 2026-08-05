@@ -69,6 +69,48 @@ def test_decode_message_ignores_unknown_frame_id(client, caplog):
     assert "DBC decode failed for arbitration_id=0x1A4" not in caplog.text
 
 
+def test_decode_message_truncated_data(client):
+    """Decoding should succeed even when fewer bytes than DLC are received."""
+    # default DBC EngineData is 8 bytes but we only send 2 bytes of data.
+    # EngineSpeed occupies bits 0-15 so 2 bytes is enough to decode it.
+    decoded = dbc_manager.decode_message(0x100, bytes([0x64, 0x00]))
+    assert decoded is not None
+    assert decoded["name"] == "EngineData"
+    assert "EngineSpeed" in decoded["signals"]
+    assert decoded["signals"]["EngineSpeed"] == pytest.approx(25.0)
+
+
+DBC_WITH_CHOICES = b'''
+VERSION ""
+
+NS_ :
+
+BS_:
+
+BU_:
+
+BO_ 512 StatusMsg: 1 Vector__XXX
+ SG_ Status : 0|2@1+ (1,0) [0|3] "" Vector__XXX
+
+VAL_ 512 Status 0 "OFF" 1 "ON" 2 "ERROR" 3 "UNKNOWN" ;
+
+'''
+
+
+def test_decode_message_named_signal_value(client):
+    """Signals with VAL_ definitions should decode to numeric float values."""
+    import io
+    client.post(
+        "/api/dbc/upload",
+        data={"file": (io.BytesIO(DBC_WITH_CHOICES), "choices.dbc")},
+        content_type="multipart/form-data",
+    )
+    # Status=1 ("ON") should decode to 1.0 not raise
+    decoded = dbc_manager.decode_message(0x200, bytes([0x01]))
+    assert decoded is not None
+    assert decoded["signals"]["Status"] == pytest.approx(1.0)
+
+
 def test_dbc_upload_valid(client):
     rv = client.post(
         "/api/dbc/upload",
