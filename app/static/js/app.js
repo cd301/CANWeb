@@ -20,6 +20,7 @@ let activePlotTabId = null;
 let plotInstances = {};           // {plotId: {layout, traces}}
 let plotUpdateTimers = {};        // {plotId: intervalId}
 const PLOT_REFRESH_MS = 500;
+const DEFAULT_AXIS_TITLES = { x: 'Time', y: 'Value' };
 
 let periodicTxTimer = null;
 
@@ -304,7 +305,7 @@ function renderPlotTabs() {
       card.className = 'plot-card';
       card.innerHTML = `
         <div class="plot-card-header">
-          <span class="plot-card-title">${plot.title} <small style="color:var(--text-dim)">[${plot.type}] ${plot.signal}</small></span>
+          <span class="plot-card-title">${plot.title} <small style="color:var(--text-dim)">[${plot.type}] ${plot.signal} • X: ${plot.xAxisTitle || DEFAULT_AXIS_TITLES.x} • Y: ${plot.yAxisTitle || DEFAULT_AXIS_TITLES.y}</small></span>
           <button class="btn-remove-plot" data-plot-id="${plot.id}">Remove</button>
         </div>
         <div class="plot-container" id="plotdiv-${plot.id}"></div>
@@ -329,20 +330,38 @@ function initPlot(plot) {
   const div = document.getElementById('plotdiv-' + plot.id);
   if (!div) return;
   Plotly.purge(div);
+  const isHistogram = plot.type === 'histogram';
   const layout = {
     paper_bgcolor: '#161b22',
     plot_bgcolor: '#0d1117',
     font: { color: '#c9d1d9', size: 11 },
     margin: { l: 50, r: 20, t: 20, b: 40 },
-    xaxis: { gridcolor: '#30363d', zerolinecolor: '#30363d' },
-    yaxis: { gridcolor: '#30363d', zerolinecolor: '#30363d' },
+    dragmode: isHistogram ? 'pan' : 'zoom',
+    xaxis: {
+      title: { text: plot.xAxisTitle || (isHistogram ? plot.signal : DEFAULT_AXIS_TITLES.x) },
+      gridcolor: '#30363d',
+      zerolinecolor: '#30363d',
+      fixedrange: false,
+    },
+    yaxis: {
+      title: { text: plot.yAxisTitle || (isHistogram ? 'Count' : DEFAULT_AXIS_TITLES.y) },
+      gridcolor: '#30363d',
+      zerolinecolor: '#30363d',
+      fixedrange: false,
+    },
     showlegend: false,
   };
   Plotly.newPlot(div, [{ x: [], y: [], type: plot.type === 'histogram' ? 'histogram' : 'scatter',
     mode: plot.type === 'line' ? 'lines' : 'markers',
     marker: { color: '#58a6ff' },
     line: { color: '#58a6ff' },
-  }], layout, { responsive: true, displayModeBar: false });
+  }], layout, {
+    responsive: true,
+    displayModeBar: true,
+    scrollZoom: true,
+    doubleClick: 'reset+autosize',
+    modeBarButtonsToRemove: ['select2d', 'lasso2d'],
+  });
 
   // Start live update
   if (plotUpdateTimers[plot.id]) clearInterval(plotUpdateTimers[plot.id]);
@@ -432,13 +451,15 @@ $('btn-modal-ok').addEventListener('click', () => {
   const title = $('plot-title').value || 'Plot';
   const type = $('plot-type').value;
   const signal = $('plot-signal').value;
+  const xAxisTitle = $('plot-x-axis-title').value.trim() || (type === 'histogram' ? signal || DEFAULT_AXIS_TITLES.x : DEFAULT_AXIS_TITLES.x);
+  const yAxisTitle = $('plot-y-axis-title').value.trim() || (type === 'histogram' ? 'Count' : DEFAULT_AXIS_TITLES.y);
   const tab = plotTabs.find(t => t.id === activePlotTabId);
   if (!tab) { closeModal(); return; }
   const plotId = 'plot_' + Date.now();
-  tab.plots.push({ id: plotId, title, type, signal });
+  tab.plots.push({ id: plotId, title, type, signal, xAxisTitle, yAxisTitle });
   renderPlotTabs();
   closeModal();
-  setTimeout(() => initPlot({ id: plotId, title, type, signal }), 100);
+  setTimeout(() => initPlot({ id: plotId, title, type, signal, xAxisTitle, yAxisTitle }), 100);
 });
 
 // Export HTML
@@ -474,7 +495,14 @@ $('btn-save-config').addEventListener('click', async () => {
     plotTabs: plotTabs.map(t => ({
       id: t.id,
       title: t.title,
-      plots: t.plots.map(p => ({ id: p.id, title: p.title, type: p.type, signal: p.signal })),
+      plots: t.plots.map(p => ({
+        id: p.id,
+        title: p.title,
+        type: p.type,
+        signal: p.signal,
+        xAxisTitle: p.xAxisTitle || '',
+        yAxisTitle: p.yAxisTitle || '',
+      })),
     })),
   };
   const fmt = prompt('Save format: json or yaml?', 'json') || 'json';

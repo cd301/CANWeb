@@ -30,6 +30,15 @@ def test_index(client):
     assert b"CANWeb" in rv.data
 
 
+def test_index_includes_plot_control_fields(client):
+    rv = client.get("/")
+    assert rv.status_code == 200
+    assert b"plot-x-axis-title" in rv.data
+    assert b"plot-y-axis-title" in rv.data
+    assert b"X Axis Title:" in rv.data
+    assert b"Y Axis Title:" in rv.data
+
+
 def test_dbc_info_no_dbc(client):
     client.post("/api/dbc/clear")
     rv = client.get("/api/dbc/info")
