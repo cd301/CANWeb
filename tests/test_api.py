@@ -364,9 +364,19 @@ def test_transmit_bad_data_logs_failure(client, caplog):
 
 
 def test_export_csv(client):
+    import csv as csv_mod
     rv = client.get("/api/export/csv")
     assert rv.status_code == 200
     assert rv.content_type.startswith("text/csv")
+    text = rv.data.decode()
+    reader = csv_mod.DictReader(text.splitlines())
+    assert set(reader.fieldnames) == {
+        "timestamp", "id", "dlc", "data", "extended", "error",
+        "decoded_name", "signal_name", "signal_value",
+    }
+    # Each row must have exactly those columns (no dict dump)
+    for row in reader:
+        assert "decoded_signals" not in row
 
 
 def test_buffer_clear(client):
