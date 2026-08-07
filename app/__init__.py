@@ -298,14 +298,23 @@ def api_export_csv():
         frames = list(_buffer)
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["timestamp", "id", "dlc", "data", "extended", "error", "decoded_name", "decoded_signals"])
+    writer.writerow(["timestamp", "id", "dlc", "data", "extended", "error", "decoded_name", "signal_name", "signal_value"])
     for f in frames:
         dec = f.get("decoded", {})
-        writer.writerow([
-            f["ts"], f["id"], f["dlc"], f["data"],
-            f.get("ext", False), f.get("error", False),
-            dec.get("name", ""), json.dumps(dec.get("signals", {})) if dec else "",
-        ])
+        signals = dec.get("signals", {}) if dec else {}
+        if signals:
+            for sig, val in signals.items():
+                writer.writerow([
+                    f["ts"], f["id"], f["dlc"], f["data"],
+                    f.get("ext", False), f.get("error", False),
+                    dec.get("name", ""), sig, val,
+                ])
+        else:
+            writer.writerow([
+                f["ts"], f["id"], f["dlc"], f["data"],
+                f.get("ext", False), f.get("error", False),
+                dec.get("name", "") if dec else "", "", "",
+            ])
     output.seek(0)
     return send_file(
         io.BytesIO(output.getvalue().encode()),

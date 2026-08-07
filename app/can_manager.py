@@ -8,6 +8,7 @@ hardware is available so the app can run without any dongle attached.
 
 from __future__ import annotations
 
+import collections
 import threading
 import time
 import random
@@ -18,6 +19,22 @@ import can
 
 
 _log = logging.getLogger(__name__)
+
+# Sliding window duration (seconds) used to calculate bus load.
+_BUS_LOAD_WINDOW = 1.0
+
+
+def _frame_bits(msg: can.Message) -> int:
+    """Return the approximate number of bits a CAN frame occupies on the bus.
+
+    For a standard (11-bit ID) data frame the overhead is 44 bits (SOF,
+    arbitration, control, CRC, ACK, EOF, IFS).  Extended frames (29-bit ID)
+    add 20 extra bits.  Each data byte is 8 bits plus up to 20 % bit-stuffing
+    overhead is ignored here for simplicity – the result is a conservative
+    lower-bound that matches common bus-load calculators.
+    """
+    overhead = 64 if getattr(msg, "is_extended_id", False) else 44
+    return overhead + len(msg.data) * 8
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -37,7 +54,8 @@ class _SimulatedBus:
         self.rx_count = 0
         self.error_count = 0
         self.bitrate = 500_000
-        self._start_time = time.monotonic()
+        # Sliding-window bus load: deque of (timestamp, bits) tuples
+        self._load_window: collections.deque = collections.deque()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -58,6 +76,7 @@ class _SimulatedBus:
             )
             with self._lock:
                 self.rx_count += 1
+                self._load_window.append((time.monotonic(), _frame_bits(msg)))
                 for cb in self._listeners:
                     try:
                         cb(msg)
@@ -86,14 +105,14 @@ class _SimulatedBus:
         self._stop.set()
 
     def bus_load(self) -> float:
-        elapsed = time.monotonic() - self._start_time
-        if elapsed == 0:
-            return 0.0
-        # Rough estimate: each frame is ~(dlc+8)*10 bits at self.bitrate
-        avg_bits = 10 * 8 * 10  # ~80 bits per frame average
-        total_bits = self.rx_count * avg_bits
-        capacity_bits = self.bitrate * elapsed
-        return min(100.0, total_bits / capacity_bits * 100)
+        now = time.monotonic()
+        cutoff = now - _BUS_LOAD_WINDOW
+        with self._lock:
+            while self._load_window and self._load_window[0][0] < cutoff:
+                self._load_window.popleft()
+            window_bits = sum(bits for _, bits in self._load_window)
+        capacity_bits = self.bitrate * _BUS_LOAD_WINDOW
+        return min(100.0, window_bits / capacity_bits * 100)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -115,7 +134,8 @@ class _RealBus:
         self.rx_count = 0
         self.error_count = 0
         self.bitrate = bitrate
-        self._start_time = time.monotonic()
+        # Sliding-window bus load: deque of (timestamp, bits) tuples
+        self._load_window: collections.deque = collections.deque()
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
@@ -135,6 +155,7 @@ class _RealBus:
                     self.error_count += 1
                 else:
                     self.rx_count += 1
+                    self._load_window.append((time.monotonic(), _frame_bits(msg)))
                 for cb in self._listeners:
                     try:
                         cb(msg)
@@ -158,13 +179,14 @@ class _RealBus:
         self._bus.shutdown()
 
     def bus_load(self) -> float:
-        elapsed = time.monotonic() - self._start_time
-        if elapsed == 0:
-            return 0.0
-        avg_bits = 10 * 8 * 10
-        total_bits = self.rx_count * avg_bits
-        capacity_bits = self.bitrate * elapsed
-        return min(100.0, total_bits / capacity_bits * 100)
+        now = time.monotonic()
+        cutoff = now - _BUS_LOAD_WINDOW
+        with self._lock:
+            while self._load_window and self._load_window[0][0] < cutoff:
+                self._load_window.popleft()
+            window_bits = sum(bits for _, bits in self._load_window)
+        capacity_bits = self.bitrate * _BUS_LOAD_WINDOW
+        return min(100.0, window_bits / capacity_bits * 100)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
