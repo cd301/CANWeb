@@ -435,3 +435,37 @@ def test_disconnect(client):
     assert rv.get_json()["ok"] is True
     # Reconnect for other tests
     client.post("/api/connect", json={"interface": "sim"})
+
+
+def test_bus_load_sliding_window():
+    """bus_load() should reflect only recent traffic, not cumulative averages."""
+    import collections
+    import can as _can
+    from app.can_manager import _frame_bits, _BUS_LOAD_WINDOW, _SimulatedBus
+
+    # Verify _frame_bits returns sensible values
+    std_msg = _can.Message(arbitration_id=0x100, data=b'\x01\x02\x03\x04', is_extended_id=False)
+    ext_msg = _can.Message(arbitration_id=0x18FF1234, data=b'\x01\x02\x03\x04', is_extended_id=True)
+    assert _frame_bits(std_msg) == 44 + 4 * 8  # 76 bits
+    assert _frame_bits(ext_msg) == 64 + 4 * 8  # 96 bits
+
+    # Bus load must drop to 0 when there are no frames within the window.
+    bus = _SimulatedBus()
+    bus._stop.set()  # stop background thread
+    time.sleep(0.05)
+    # Fill the window with old (expired) entries
+    old_ts = time.monotonic() - _BUS_LOAD_WINDOW - 1.0
+    with bus._lock:
+        bus._load_window.clear()
+        bus._load_window.append((old_ts, 80))
+    assert bus.bus_load() == pytest.approx(0.0)
+
+    # With fresh frames the load should be non-zero and bounded
+    now = time.monotonic()
+    with bus._lock:
+        bus._load_window.clear()
+        # Simulate 10 frames arriving within the current window
+        for _ in range(10):
+            bus._load_window.append((now - 0.1, 80))
+    load = bus.bus_load()
+    assert 0.0 < load <= 100.0
