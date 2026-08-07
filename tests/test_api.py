@@ -435,3 +435,111 @@ def test_disconnect(client):
     assert rv.get_json()["ok"] is True
     # Reconnect for other tests
     client.post("/api/connect", json={"interface": "sim"})
+
+
+DBC_SECOND = b'''
+VERSION ""
+
+NS_ :
+
+BS_:
+
+BU_:
+
+BO_ 512 BrakeData: 8 Vector__XXX
+ SG_ BrakePressure : 0|8@1+ (1,0) [0|255] "bar" Vector__XXX
+
+'''
+
+
+def test_stacking_multiple_dbcs_single_request(client):
+    """Selecting multiple DBC files at once merges them all into one DB."""
+    client.post("/api/dbc/clear")
+
+    rv = client.post(
+        "/api/dbc/upload",
+        data={
+            "file": [
+                (io.BytesIO(DBC_CONTENT), "engine.dbc"),
+                (io.BytesIO(DBC_SECOND), "brake.dbc"),
+            ]
+        },
+        content_type="multipart/form-data",
+    )
+    assert rv.status_code == 200
+
+    rv_info = client.get("/api/dbc/info")
+    data = rv_info.get_json()
+    assert data["loaded"] is True
+    msg_names = [m["name"] for m in data["messages"]]
+    assert "EngineData" in msg_names
+    assert "BrakeData" in msg_names
+    assert len(data["filenames"]) == 2
+
+    decoded_engine = dbc_manager.decode_message(0x100, bytes([0x64, 0x00, 0x80, 0x00, 0, 0, 0, 0]))
+    assert decoded_engine is not None
+    assert decoded_engine["name"] == "EngineData"
+
+    decoded_brake = dbc_manager.decode_message(0x200, bytes([0x7F, 0, 0, 0, 0, 0, 0, 0]))
+    assert decoded_brake is not None
+    assert decoded_brake["name"] == "BrakeData"
+
+
+def test_stacking_with_append_param(client):
+    """Uploading separate files with append=true stacks onto the existing DB."""
+    client.post("/api/dbc/clear")
+
+    client.post(
+        "/api/dbc/upload",
+        data={"file": (io.BytesIO(DBC_CONTENT), "engine.dbc")},
+        content_type="multipart/form-data",
+    )
+
+    rv = client.post(
+        "/api/dbc/upload",
+        data={"file": (io.BytesIO(DBC_SECOND), "brake.dbc"), "append": "true"},
+        content_type="multipart/form-data",
+    )
+    assert rv.status_code == 200
+
+    rv_info = client.get("/api/dbc/info")
+    data = rv_info.get_json()
+    msg_names = [m["name"] for m in data["messages"]]
+    assert "EngineData" in msg_names
+    assert "BrakeData" in msg_names
+    assert len(data["filenames"]) == 2
+
+
+def test_stacking_replace_when_append_false(client):
+    """Uploading with append=false (default) should replace the existing DB."""
+    client.post("/api/dbc/clear")
+
+    client.post(
+        "/api/dbc/upload",
+        data={"file": (io.BytesIO(DBC_CONTENT), "engine.dbc")},
+        content_type="multipart/form-data",
+    )
+
+    client.post(
+        "/api/dbc/upload",
+        data={"file": (io.BytesIO(DBC_SECOND), "brake.dbc")},
+        content_type="multipart/form-data",
+    )
+
+    rv_info = client.get("/api/dbc/info")
+    data = rv_info.get_json()
+    msg_names = [m["name"] for m in data["messages"]]
+    assert "BrakeData" in msg_names
+    assert "EngineData" not in msg_names
+    assert len(data["filenames"]) == 1
+
+
+def test_dbc_info_returns_filenames(client):
+    """get_db_info should return a 'filenames' list."""
+    dbc_manager.load_dbc(dbc_manager.default_dbc_path())
+    rv = client.get("/api/dbc/info")
+    data = rv.get_json()
+    assert data["loaded"] is True
+    assert "filenames" in data
+    assert isinstance(data["filenames"], list)
+    assert len(data["filenames"]) >= 1

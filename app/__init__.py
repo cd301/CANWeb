@@ -194,21 +194,36 @@ def api_disconnect():
 
 @app.route("/api/dbc/upload", methods=["POST"])
 def api_dbc_upload():
-    if "file" not in request.files:
+    files = request.files.getlist("file")
+    if not files or all(f.filename == "" for f in files):
         return jsonify({"ok": False, "error": "No file"}), 400
-    f = request.files["file"]
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".dbc")
+
+    # When multiple files are sent in one request, stack them all.
+    # When a single file is sent, honour the explicit 'append' param (default false).
+    multiple = len(files) > 1
+    append_param = request.form.get("append", "false").lower() not in ("false", "0", "no")
+
+    info = None
+    tmp_paths = []
     try:
-        tmp.close()
-        f.save(tmp.name)
-        info = dbc_manager.load_dbc(tmp.name)
+        for i, f in enumerate(files):
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".dbc")
+            tmp.close()
+            tmp_paths.append(tmp.name)
+            f.save(tmp.name)
+            append = (multiple and i > 0) or (not multiple and append_param)
+            info = dbc_manager.load_dbc(tmp.name, append=append)
         _redecode_buffered_frames()
         return jsonify({"ok": True, **info})
     except Exception:
         _log.exception("DBC upload failed")
         return jsonify({"ok": False, "error": "Failed to parse DBC file"}), 400
     finally:
-        os.unlink(tmp.name)
+        for p in tmp_paths:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
 
 
 @app.route("/api/dbc/info")
