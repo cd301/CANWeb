@@ -18,7 +18,7 @@ _log = logging.getLogger(__name__)
 
 _db: Optional[cantools.db.Database] = None
 _db_lock = threading.Lock()
-_db_filename: str = ""
+_db_filenames: list[str] = []
 
 
 def _message_lookup_ids(arb_id: int, is_extended: Optional[bool] = None) -> list[int]:
@@ -31,12 +31,25 @@ def _message_lookup_ids(arb_id: int, is_extended: Optional[bool] = None) -> list
     return list(dict.fromkeys(lookup_ids))
 
 
-def load_dbc(filepath: str) -> dict:
-    global _db, _db_filename
-    db = cantools.database.load_file(filepath)
+def load_dbc(filepath: str, append: bool = False) -> dict:
+    global _db, _db_filenames
     with _db_lock:
-        _db = db
-        _db_filename = filepath
+        if append and _db is not None:
+            try:
+                _db.add_dbc_file(filepath)
+                _db_filenames.append(filepath)
+            except Exception:
+                _log.warning(
+                    "Could not merge DBC file %s into existing database; "
+                    "some messages may be duplicates or conflicting",
+                    filepath,
+                )
+                raise
+            db = _db
+        else:
+            _db = cantools.database.load_file(filepath)
+            _db_filenames = [filepath]
+            db = _db
     return {
         "messages": [
             {
@@ -87,7 +100,7 @@ def get_db_info() -> Optional[dict]:
         if _db is None:
             return None
         return {
-            "filename": _db_filename,
+            "filenames": list(_db_filenames),
             "messages": [
                 {
                     "id": f"0x{m.frame_id:X}",
@@ -107,7 +120,7 @@ def default_dbc_path() -> str:
 
 
 def clear_dbc():
-    global _db, _db_filename
+    global _db, _db_filenames
     with _db_lock:
         _db = None
-        _db_filename = ""
+        _db_filenames = []
